@@ -153,7 +153,7 @@ void interact(void)
 int main(int argc, char **argv)
 {
     if(argc < 3) {
-        fprintf(stderr, "Usage: sender <server_IP> <server_port>\n");
+        fprintf(stderr, "Usage: client <server_IP> <server_port>\n");
         exit(EXIT_FAILURE);
     }
 
