@@ -1,8 +1,13 @@
 #include "spec.h"
 #include <time.h>
 #include <stddef.h>
+#include <sys/stat.h>
 
 #define PACKET_SIZE(data_len) ((offsetof(Packet, data)) + (data_len))
+#define BAR "================================"
+#define BAR_LEN 32
+#define GREEN "\x1b[32m"
+#define RESET "\x1b[0m"
 
 int sockfd;
 uint32_t window_base;
@@ -10,6 +15,14 @@ uint32_t window_next;
 timer_t timers[WINDOW_SIZE];
 Packet cache[WINDOW_SIZE];
 bool ackd[WINDOW_SIZE];
+off_t filesize;
+
+void print_progress(off_t sent)
+{
+    printf("[" GREEN "%-*.*s" RESET "] %3d%%\r",
+           BAR_LEN, (filesize) ? (int)(BAR_LEN*sent/filesize) : BAR_LEN, BAR,
+           (int)(100*sent/filesize));
+}
 
 void send_packet(uint32_t idx)
 {
@@ -49,6 +62,12 @@ void send_file(const char *filename)
     FILE *fptr = fopen(filename, "r");
     if(!fptr)
         FATAL_MSG("fopen");
+
+    struct stat buf;
+    if(stat(filename, &buf) < 0)
+        FATAL_MSG("stat");
+    filesize = buf.st_size;
+    off_t sent = 0;
 
     /* Synchronize sequence number with server.
      * Meanwhile, inform server of name of file to be transmitted. */
@@ -96,8 +115,13 @@ void send_file(const char *filename)
 
         /* Ignore ACK for sequence number outside window*/
         if(INSIDE_RANGE(window_base, window_next-1, rcvd_seq)) {
-            ackd[rcvd_seq%WINDOW_SIZE] = true;
-            disarm_timer(rcvd_seq%WINDOW_SIZE);
+            uint32_t idx = rcvd_seq % WINDOW_SIZE;
+            if(!ackd[idx]) {
+                ackd[idx] = true;
+                disarm_timer(idx);
+                sent += cache[idx].data_len;
+                print_progress(sent);
+            }
         }
         /* Check ACK status and slide window. */
         while(ackd[window_base%WINDOW_SIZE]) {
@@ -137,10 +161,12 @@ void interact(void)
 
         if(!strcmp(cmd, "put")) {
             char *filename = strtok(NULL, " \n\t");
-            if(!filename)
-                printf("Error: invalid format\n");
-            else
+            if(filename) {
                 send_file(filename);
+                printf("\n");
+            }
+            else
+                printf("Error: invalid format\n");
         }
         else if(!strcmp(cmd, "exit"))
             return;
